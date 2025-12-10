@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\DjSoftwareProvider;
 use App\Models\CanonicalTrack;
+use App\Models\RawArtist;
 use App\Models\RawTrack;
 use App\Models\Rekordbox\RekordboxTrack;
 use Illuminate\Console\Command;
@@ -39,13 +40,20 @@ class RekordboxImportTracks extends Command
 
         $newTrackCount = 0;
 
-        RekordboxTrack::query()->whereNotIn(
+        RekordboxTrack::query()
+            ->with('rekordboxKey')
+            ->whereNotIn(
             'ID',
             $existingTracks
         )->chunk(500, function (Collection $trackCollection) use (&$newTrackCount) {
-            $trackCollection->load(['rekordboxKey', 'rawArtist']);
+            $rawArtists = RawArtist::query()
+                ->where('provider', DjSoftwareProvider::REKORDBOX)
+                ->whereIn('provider_id', $trackCollection->pluck('ArtistID'))
+                ->get()
+                ->keyBy('provider_id');
+
             $trackCollection
-                ->filter(function (RekordboxTrack $rekordboxTrack) {
+                ->filter(function (RekordboxTrack $rekordboxTrack) use ($rawArtists) {
                     // Skip any tracks with an empty title
                     $title = Str::trim($rekordboxTrack->Title);
                     if (Str::length($title) === 0) {
@@ -54,22 +62,25 @@ class RekordboxImportTracks extends Command
                         return false;
                     }
 
+                    $rawArtist = $rawArtists->get($rekordboxTrack->ArtistID);
+
                     // Skip any tracks that we have yet to import the artist for
-                    if ($rekordboxTrack->ArtistID !== null && $rekordboxTrack->rawArtist === null) {
+                    if ($rekordboxTrack->ArtistID !== null && $rawArtist === null) {
                         $this->warn("Skipping track: $title ($rekordboxTrack->ID) as raw artist with ID $rekordboxTrack->ArtistID doesn't exist");
 
                         return false;
                     }
 
                     return true;
-                })->each(function (RekordboxTrack $rekordboxTrack) use (&$newTrackCount) {
+                })->each(function (RekordboxTrack $rekordboxTrack) use (&$newTrackCount, $rawArtists) {
                     $title = Str::trim($rekordboxTrack->Title);
+                    $rawArtist = $rawArtists->get($rekordboxTrack->ArtistID);
 
                     $this->info("Creating Track: $title ($rekordboxTrack->ID)", OutputInterface::VERBOSITY_VERBOSE);
 
                     $baseData = [
                         'title' => $title,
-                        'raw_artist_id' => $rekordboxTrack->rawArtist?->id,
+                        'raw_artist_id' => $rawArtist?->id,
                         'bpm' => $rekordboxTrack->BPM / 100,
                         'duration' => $rekordboxTrack->Length,
                         'key' => $rekordboxTrack->rekordboxKey?->ScaleName,

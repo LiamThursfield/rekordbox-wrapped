@@ -27,13 +27,4 @@ class RekordboxTrack extends RekordboxModel
     {
         return $this->hasOne(RekordboxKey::class, 'ID', 'KeyID');
     }
-
-    /**
-     * @return HasOne<RawArtist>
-     */
-    public function rawArtist(): HasOne
-    {
-        return $this->hasOne(RawArtist::class, 'provider_id', 'ArtistID')
-            ->where('provider', DjSoftwareProvider::REKORDBOX);
-    }
 }
